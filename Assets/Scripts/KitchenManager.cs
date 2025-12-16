@@ -143,7 +143,7 @@ public class KitchenManager : MonoBehaviour
         public GameObject customerVisual;
     }
 
-    // --- NEW: CASH REGISTRY ---
+    // --- CASH REGISTRY ---
     private class CashDrop
     {
         public bool isTableCash;
@@ -152,7 +152,7 @@ public class KitchenManager : MonoBehaviour
     private List<CashDrop> cashRegistry = new List<CashDrop>();
     // --- END CASH REGISTRY ---
 
-    // --- SETUP & MAIN LOOP ---
+    // --- SETUP ---
 
     void Start()
     {
@@ -194,11 +194,13 @@ public class KitchenManager : MonoBehaviour
         if (tableCustomerObject != null) tableCustomerObject.transform.position = entrancePosition.position;
     }
 
+    // --- MAIN GAME LOOPS ---
+
     void Update()
     {
+        // Non-physics, input, and timer logic runs in Update
         gameTime += Time.deltaTime;
 
-        HandlePlayerMovement();
         HandlePlayerInteraction(); // Check for 'E' key press near stations
         StoveUpdate(); // Manages all 6 timers
 
@@ -212,13 +214,18 @@ public class KitchenManager : MonoBehaviour
         CheckOrders();
         HandleCustomerAI();
         UpdateHeldItemVisuals();
-
-        // Check and handle automatic cash collection every frame
         CheckForCashPickup();
+    }
+
+    void FixedUpdate()
+    {
+        // Physics-related logic (Rigidbody movement) runs in FixedUpdate
+        HandlePlayerMovement();
     }
 
     void LateUpdate()
     {
+        // Camera follow runs in LateUpdate after all movement/physics is finalized
         if (mainCamera == null || playerTransform == null) return;
 
         Vector3 desiredPosition = playerTransform.position + cameraOffset;
@@ -251,7 +258,8 @@ public class KitchenManager : MonoBehaviour
         if (finalDirection.magnitude > 0.1f)
         {
             Quaternion targetRotation = Quaternion.LookRotation(finalDirection);
-            playerTransform.rotation = Quaternion.Slerp(playerTransform.rotation, targetRotation, Time.deltaTime * 10f);
+            // We use Time.fixedDeltaTime here for rotation to keep it aligned with physics steps
+            playerTransform.rotation = Quaternion.Slerp(playerTransform.rotation, targetRotation, Time.fixedDeltaTime * 10f);
         }
     }
 
@@ -292,7 +300,7 @@ public class KitchenManager : MonoBehaviour
             else if (CheckProximity(vegBinPosition) && vegBinPosition != null) PickUpItem("Vegetables");
             else if (CheckProximity(spiceBinPosition) && spiceBinPosition != null) PickUpItem("Spices");
 
-            // --- 2. Dish Bin (Drop off dirty plates) ---
+            // --- 2. Dish Bin (Drop off dirty plates / TRASH INGREDIENTS) ---
             else if (CheckProximity(dishBinPosition) && dishBinPosition != null) ProcessInteraction("DishBin");
 
             // --- 3. Stove (Cook/Collect) ---
@@ -319,7 +327,6 @@ public class KitchenManager : MonoBehaviour
 
     private void CollectCash(bool isTableCash)
     {
-        // FIND the cash drop record in the registry
         CashDrop cashDrop = cashRegistry.FirstOrDefault(d => d.isTableCash == isTableCash);
 
         if (cashDrop != null)
@@ -328,7 +335,6 @@ public class KitchenManager : MonoBehaviour
 
             int collectedAmount = cashDrop.amount;
 
-            // REMOVE the cash drop record now that it's collected
             cashRegistry.Remove(cashDrop);
 
             Debug.Log($"Collected ₹{collectedAmount} at {(isTableCash ? "Table" : "Counter")}. Total Money: ₹{totalMoney}");
@@ -386,6 +392,12 @@ public class KitchenManager : MonoBehaviour
             {
                 currentHeldItem = "None";
                 Debug.Log("Dirty Plate disposed of in the Dish Bin. Good job!");
+            }
+            // TRASH INGREDIENT LOGIC
+            else if (requiredIngredients.Contains(currentHeldItem))
+            {
+                Debug.Log($"Trashed {currentHeldItem}. What a waste!");
+                currentHeldItem = "None"; // Clear the held item, resolving softlock
             }
             else if (currentHeldItem != "None")
             {
@@ -450,7 +462,9 @@ public class KitchenManager : MonoBehaviour
                 }
                 else
                 {
-                    Debug.Log($"Stove is full or no active pots need {ingredientToAdd}.");
+                    // Player is holding an ingredient but stove slots are full 
+                    // and no active slots need this item.
+                    Debug.Log($"Stove is full or no active pots need {ingredientToAdd}. Cannot place item.");
                 }
             }
             // 3. INTERACTING WITH COOKING/EMPTY STOVE WHILE EMPTY-HANDED (for debug info)
@@ -672,7 +686,7 @@ public class KitchenManager : MonoBehaviour
 
                 int score = (int)(baseValue * (timeRemaining / matchingOrder.timeLimit) + baseValue);
 
-                // NEW: Register the cash drop before removing the order
+                // REGISTER CASH: Store score in the Cash Registry before removing the order
                 cashRegistry.Add(new CashDrop { isTableCash = deliveredToTable, amount = score });
 
                 Debug.Log($"SUCCESS! Delivered {deliveredFoodName}. Potential Earnings: ₹{score}");
@@ -766,64 +780,63 @@ public class KitchenManager : MonoBehaviour
         }
     }
 
-    // --- VISUAL DEBUGGING (Optional) ---
+    // --- VISUAL DEBUGGING (Optional, Mobile Friendly) ---
     void OnGUI()
     {
-        // Show total money (updated font size for better visibility)
-        GUIStyle moneyStyle = new GUIStyle(GUI.skin.label);
-        moneyStyle.fontSize = 24;
+        // Calculate dynamic font size based on the smaller dimension (width or height)
+        int baseFontSize = Mathf.RoundToInt(Mathf.Min(Screen.width, Screen.height) * 0.04f); // 4% of min dimension
+
+        // Style for status info
+        GUIStyle debugStyle = new GUIStyle(GUI.skin.label);
+        debugStyle.fontSize = baseFontSize;
+        debugStyle.normal.textColor = Color.white;
+
+        // Style for money (slightly larger/bolder)
+        GUIStyle moneyStyle = new GUIStyle(debugStyle);
+        moneyStyle.fontSize = Mathf.RoundToInt(baseFontSize * 1.3f); // 30% larger than debug text
         moneyStyle.fontStyle = FontStyle.Bold;
         moneyStyle.normal.textColor = Color.yellow;
-        GUI.Label(new Rect(Screen.width - 250, 10, 240, 30), $"Cash: ₹{totalMoney}", moneyStyle);
 
-        // Debug Info
-        GUI.Label(new Rect(10, 10, 300, 20), $"Time: {gameTime:F1}s");
+        float lineSpacing = moneyStyle.fontSize + 5; // Use money font size for consistent spacing
 
-        // Customer Debug Info
-        GUI.Label(new Rect(10, 30, 400, 20), $"Counter: {counterCustomerState.ToString()} (Cash: {counterHasCash})");
-        GUI.Label(new Rect(10, 50, 400, 20), $"Table: {tableCustomerState.ToString()} (Plate: {tableHasPlate} | Cash: {tableHasCash} | Eat: {tableEatingTimer:F1}s)");
+        // Define top margin based on screen size (e.g., 5% of height)
+        float topMargin = Screen.height * 0.05f;
+        float leftY = topMargin;
 
-        // Stove Slot Status
-        GUI.Label(new Rect(10, 80, 500, 20), "--- STOVE SLOTS (Capacity: 6) ---");
-        for (int i = 0; i < maxStoveSlots; i++)
-        {
-            CookingSlot slot = stoveSlots[i];
-            string status = slot.status;
-            string details = "";
+        // Define X padding based on font size
+        float paddingX = baseFontSize * 0.5f;
 
-            if (status == "Cooking")
-            {
-                details = $" (Timer: {slot.timer:F1}s)";
-            }
-            else if (status == "Adding Ingredients" || status == "Ready")
-            {
-                int added = slot.ingredientsAdded.Count(kv => kv.Value);
-                int total = slot.ingredientsAdded.Count;
-                details = $" ({added}/{total} ingredients)";
-            }
+        // Define a safe width for the debug panel (e.g., 70% of screen width)
+        float panelWidth = Screen.width * 0.7f;
 
-            GUI.Label(new Rect(10, 100 + (i * 20), 500, 20), $"Slot {i}: {status}{details}");
-        }
+        // --- TOP LEFT: TIME AND STATUS SUMMARY ---
 
+        // Time 
+        GUI.Label(new Rect(paddingX, leftY, panelWidth, lineSpacing), $"Time: {gameTime:F1}s", debugStyle);
+        leftY += lineSpacing;
 
-        GUI.Label(new Rect(10, 100 + (maxStoveSlots * 20) + 20, 300, 20), "--- ORDERS ---");
-        for (int i = 0; i < currentOrders.Count; i++)
-        {
-            Order o = currentOrders[i];
-            float remaining = o.timeLimit - (gameTime - o.startTime);
-            string location = o.isTableOrder ? "Table" : "Counter";
-            GUI.Label(new Rect(10, 120 + (maxStoveSlots * 20) + 20 + (i * 20), 400, 20),
-                      $"{o.requiredFood} ({location}): {remaining:F1}s left");
-        }
+        // Active Orders Count
+        GUI.Label(new Rect(paddingX, leftY, panelWidth, lineSpacing), $"Orders Waiting: {currentOrders.Count}", debugStyle);
+        leftY += lineSpacing;
 
-        // Display Cash Registry Debug
-        GUI.Label(new Rect(10, 140 + (maxStoveSlots * 20) + 20 + (currentOrders.Count * 20), 300, 20), $"--- CASH REGISTRY (Count: {cashRegistry.Count}) ---");
-        for (int i = 0; i < cashRegistry.Count; i++)
-        {
-            CashDrop drop = cashRegistry[i];
-            string location = drop.isTableCash ? "Table" : "Counter";
-            GUI.Label(new Rect(10, 160 + (maxStoveSlots * 20) + 20 + (currentOrders.Count * 20) + (i * 20), 300, 20),
-                      $"{location}: ₹{drop.amount}");
-        }
+        // Stove Summary
+        int cookingCount = stoveSlots.Count(s => s.status == "Cooking");
+        int readyCount = stoveSlots.Count(s => s.status == "Ready");
+        GUI.Label(new Rect(paddingX, leftY, panelWidth, lineSpacing), $"Stove: Cook:{cookingCount} | Ready:{readyCount}", debugStyle);
+        leftY += lineSpacing;
+
+        // Table Status
+        string tableStatus = tableCustomerState.ToString();
+        if (tableHasPlate) tableStatus += " (CLEAN ME!)";
+        else if (tableHasCash) tableStatus += " (COLLECT CASH!)";
+
+        GUI.Label(new Rect(paddingX, leftY, panelWidth, lineSpacing), $"Table Status: {tableStatus}", debugStyle);
+        leftY += lineSpacing;
+
+        // --- Money moved below the Table Status ---
+        GUI.Label(new Rect(paddingX, leftY, panelWidth, lineSpacing), $"Cash: ₹{totalMoney}", moneyStyle);
+        leftY += lineSpacing;
+
+        // NOTE: Removed line-by-line printing of all 6 stove slots and cash registry to declutter the mobile screen.
     }
 }
